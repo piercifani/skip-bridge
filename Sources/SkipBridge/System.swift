@@ -139,28 +139,29 @@ public func loadPeerLibrary(packageName: String, moduleName libName: String) thr
         arch = osArch == "aarch64" ? "arm64-apple-macosx" : "x86_64-apple-macosx"
     }
     let sharedObject = "lib\(libName).\(libext)"
-    let libPath = ".build/\(libName)/swift/\(arch)/debug/\(sharedObject)"
+    let scratchPath = ".build/\(libName)/swift"
+    // The native build system lays products out under <triple>/debug; the swiftbuild build system
+    // (the SwiftPM default from Swift 6.4 on Linux) under out/Products/Debug-<os>-<arch> (Linux) or
+    // out/Products/Debug (macOS)
+    let swiftBuildArch = osArch == "amd64" ? "x86_64" : osArch
+    let libPaths = [
+        "\(scratchPath)/\(arch)/debug/\(sharedObject)",
+        "\(scratchPath)/out/Products/Debug-linux-\(swiftBuildArch)/\(sharedObject)",
+        "\(scratchPath)/out/Products/Debug/\(sharedObject)",
+    ]
 
+    // cwd from Xcode: ~/Library/Developer/Xcode/DerivedData/*-*/SourcePackages/plugins/skip-bridge.output/SkipBridgeSamplesTests/skipstone
+    // cwd from swiftPM CLI: /opt/src/github/skiptools/skip-bridge/.build/plugins/outputs/skip-bridge/SkipBridgeSamplesTests/destination/skipstone/SkipBridgeSamples
     let cwd = System.getProperty("user.dir")
-
-    var libraryPath: String
-    if let testBundlePath = env["XCTestBundlePath"] { // running from within an Xcode test case, the XCTestBundlePath points to somewhere like: ~/Library/Developer/Xcode/DerivedData/*-*/Build/Products/Debug/SkipBridgeSamplesTests.xctest
-        // cwd from Xcode: /Users/marc/Library/Developer/Xcode/DerivedData/Skip-Everything-aqywrhrzhkbvfseiqgxuufbdwdft/SourcePackages/plugins/skip-bridge.output/SkipBridgeSamplesTests/skipstone
-        // libraryPath = cwd + "/../../../\(libName)/skipstone/\(libName)/" + libPath
-        libraryPath = cwd + "/" + libPath
-    } else {
-        // need to update for forked swift build output
-
-        // cwd from swiftPM CLI: /opt/src/github/skiptools/skip-bridge/.build/plugins/outputs/skip-bridge/SkipBridgeSamplesTests/destination/skipstone/SkipBridgeSamples
-        libraryPath = cwd + "/" + libPath
+    let libraryPaths = libPaths.map { cwd + "/" + $0 }
+    let libraryPath = libraryPaths.first(where: { loadedLibraries.contains($0) || java.io.File($0).isFile() }) ?? ""
+    if libraryPath.isEmpty {
+        error("error: missing library: \(libraryPaths.joined(separator: " or "))")
     }
 
     if loadedLibraries.contains(libraryPath) {
         print("note: already loaded library: \(libraryPath)")
         return
-    } else if !java.io.File(libraryPath).isFile() {
-        // load the native library that contains the function implementations
-        error("error: missing library: \(libraryPath)")
     } else {
         print("note: loading library: \(libraryPath)")
         System.load(libraryPath)
